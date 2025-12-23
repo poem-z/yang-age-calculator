@@ -3,117 +3,171 @@ import pandas as pd
 from datetime import datetime, date
 
 # --- 페이지 설정 ---
-st.set_page_config(page_title="나이 계산기 & 캐릭터 관리", page_icon="🎂")
+st.set_page_config(page_title="캐릭터 관리 매니저", page_icon="📜", layout="wide")
 
-st.title("🎂 나이 계산 및 캐릭터 정리기")
+# --- 세션 상태 초기화 (데이터 저장소) ---
+# 사이트가 켜져 있는 동안 데이터를 기억하기 위한 공간입니다.
+if 'char_list' not in st.session_state:
+    st.session_state.char_list = []
 
-# --- 공통 함수: 나이 계산 로직 ---
+# --- 공통 함수: 나이 계산 ---
 def calculate_ages(birth_date):
     today = date.today()
-    
-    # birth_date가 datetime 객체일 경우 date로 변환
     if isinstance(birth_date, datetime):
         birth_date = birth_date.date()
-        
-    # 만 나이 계산
-    # (오늘 월/일)이 (생일 월/일)보다 이전이면 1살 뺌
-    man_age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
     
-    # 세는 나이 계산 (한국식: 태어나면 1살 + 새해마다 1살)
+    # 만 나이
+    man_age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+    # 세는 나이
     korean_age = today.year - birth_date.year + 1
     
-    return man_age, korean_age
+    return man_age, korean_age, birth_date
 
-# --- 탭 구성 ---
-tab1, tab2 = st.tabs(["👤 개별 조회", "📂 파일 업로드 (캐릭터 리스트)"])
-
-# ==========================================
-# 기능 1: 개별 정보 입력 및 조회
-# ==========================================
-with tab1:
-    st.header("개별 생년월일 조회")
+# --- 공통 함수: 데이터 추가 ---
+def add_character(name, b_date, b_time=None):
+    man, kor, clean_date = calculate_ages(b_date)
+    time_str = b_time.strftime('%H:%M') if b_time else "미입력"
     
-    with st.form("individual_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            name = st.text_input("이름", placeholder="홍길동")
-        with col2:
-            birth_date = st.date_input("생년월일", min_value=date(1900, 1, 1), max_value=date.today())
-            
-        birth_time = st.time_input("태어난 시간 (선택사항)", value=None)
+    new_data = {
+        "이름": name,
+        "생년월일": clean_date,
+        "태어난 시간": time_str,
+        "만 나이": man,
+        "세는 나이": kor
+    }
+    st.session_state.char_list.append(new_data)
+
+# --- 공통 함수: 마크다운 텍스트 생성 ---
+def generate_markdown(df):
+    # 데이터프레임을 마크다운 표 형식 텍스트로 변환
+    md = "| 이름 | 생년월일 | 태어난 시간 | 만 나이 | 세는 나이 |\n"
+    md += "| :--- | :--- | :--- | :--- | :--- |\n"
+    for index, row in df.iterrows():
+        md += f"| {row['이름']} | {row['생년월일']} | {row['태어난 시간']} | {row['만 나이']}세 | {row['세는 나이']}세 |\n"
+    return md
+
+# ==========================================
+# 사이드바: 데이터 입력 및 관리
+# ==========================================
+with st.sidebar:
+    st.header("📝 캐릭터 등록")
+    
+    # 1. 개별 등록 탭
+    st.subheader("1. 한 명씩 추가")
+    with st.form("add_one_form", clear_on_submit=True):
+        input_name = st.text_input("이름")
+        input_date = st.date_input("생년월일", min_value=date(1900, 1, 1), max_value=date.today())
+        input_time = st.time_input("시간 (선택)", value=None)
         
-        submitted = st.form_submit_button("계산하기")
-        
-        if submitted:
-            if name:
-                man_age, korean_age = calculate_ages(birth_date)
-                
-                # 결과 출력
-                st.divider()
-                st.subheader(f"👋 안녕하세요, {name}님!")
-                
-                result_col1, result_col2 = st.columns(2)
-                with result_col1:
-                    st.info(f"**생년월일**: {birth_date.strftime('%Y년 %m월 %d일')}")
-                    if birth_time:
-                        st.info(f"**태어난 시간**: {birth_time.strftime('%H시 %M분')}")
-                    else:
-                        st.info("**태어난 시간**: 입력되지 않음")
-                        
-                with result_col2:
-                    st.success(f"**만 나이**: {man_age}세")
-                    st.warning(f"**세는 나이**: {korean_age}세")
+        btn_add = st.form_submit_button("리스트에 추가")
+        if btn_add:
+            if input_name:
+                add_character(input_name, input_date, input_time)
+                st.success(f"'{input_name}' 추가 완료!")
             else:
-                st.error("이름을 입력해주세요.")
+                st.error("이름을 입력하세요.")
 
-# ==========================================
-# 기능 2: 파일 업로드 및 일괄 정리
-# ==========================================
-with tab2:
-    st.header("캐릭터 정보 파일 업로드")
-    st.markdown("""
-    **사용법:**
-    1. 엑셀(.xlsx) 또는 CSV 파일을 업로드하세요.
-    2. 파일에는 **'이름'**, **'생년월일'** 컬럼이 반드시 포함되어야 합니다.
-    (예: 생년월일 형식은 2000-01-01 또는 2000/01/01 등)
-    """)
-    
-    uploaded_file = st.file_uploader("파일 선택", type=['csv', 'xlsx'])
-    
+    st.divider()
+
+    # 2. 파일 일괄 등록 탭
+    st.subheader("2. 파일로 일괄 추가")
+    uploaded_file = st.file_uploader("엑셀/CSV 업로드", type=['csv', 'xlsx'])
     if uploaded_file is not None:
-        try:
-            # 파일 읽기
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file)
-            else:
-                df = pd.read_excel(uploaded_file)
-            
-            # 필수 컬럼 확인 (공백 제거 후 비교)
-            df.columns = [c.strip() for c in df.columns]
-            
-            if '이름' in df.columns and '생년월일' in df.columns:
-                # 생년월일 형식 변환
-                df['생년월일'] = pd.to_datetime(df['생년월일']).dt.date
+        if st.button("파일 데이터 병합하기"):
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    temp_df = pd.read_csv(uploaded_file)
+                else:
+                    temp_df = pd.read_excel(uploaded_file)
                 
-                # 나이 계산 적용
-                age_results = df['생년월일'].apply(calculate_ages)
+                # 컬럼 공백 제거
+                temp_df.columns = [c.strip() for c in temp_df.columns]
                 
-                # 결과 데이터프레임에 추가
-                df['만 나이'] = age_results.apply(lambda x: f"{x[0]}세")
-                df['세는 나이'] = age_results.apply(lambda x: f"{x[1]}세")
-                
-                # 깔끔하게 보여줄 컬럼 순서 지정
-                display_cols = ['이름', '생년월일', '만 나이', '세는 나이']
-                
-                # 나머지 컬럼도 있다면 뒤에 붙이기
-                other_cols = [c for c in df.columns if c not in display_cols]
-                final_df = df[display_cols + other_cols]
-                
-                st.write(f"총 **{len(df)}**명의 캐릭터 정보를 불러왔습니다.")
-                st.dataframe(final_df, use_container_width=True)
-                
-            else:
-                st.error("파일에 '이름'과 '생년월일' 컬럼이 있는지 확인해주세요.")
-                
-        except Exception as e:
-            st.error(f"파일을 처리하는 중 오류가 발생했습니다: {e}")
+                if '이름' in temp_df.columns and '생년월일' in temp_df.columns:
+                    count = 0
+                    for _, row in temp_df.iterrows():
+                        # 날짜 변환 시도
+                        b_date = pd.to_datetime(row['생년월일'])
+                        add_character(row['이름'], b_date)
+                        count += 1
+                    st.success(f"{count}명 추가 성공!")
+                else:
+                    st.error("파일에 '이름', '생년월일' 컬럼이 필요합니다.")
+            except Exception as e:
+                st.error(f"오류 발생: {e}")
+    
+    st.divider()
+    
+    # 리셋 버튼
+    if st.button("🗑️ 리스트 전체 삭제"):
+        st.session_state.char_list = []
+        st.rerun()
+
+# ==========================================
+# 메인 화면: 리스트 출력 및 기능
+# ==========================================
+st.title("📜 캐릭터 정보 리스트")
+
+# 데이터가 있을 때만 표시
+if len(st.session_state.char_list) > 0:
+    
+    # DataFrame 변환
+    df = pd.DataFrame(st.session_state.char_list)
+    
+    # --- 기능: 정렬 옵션 ---
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        sort_option = st.radio(
+            "정렬 기준 선택:",
+            ["등록순", "나이 많은 순 (연장자)", "나이 적은 순 (연소자)", "이름순"],
+            horizontal=True
+        )
+    
+    # 정렬 로직 적용
+    if sort_option == "나이 많은 순 (연장자)":
+        df = df.sort_values(by="생년월일", ascending=True) # 생일이 빠를수록 나이가 많음
+    elif sort_option == "나이 적은 순 (연소자)":
+        df = df.sort_values(by="생년월일", ascending=False)
+    elif sort_option == "이름순":
+        df = df.sort_values(by="이름")
+    
+    # 인덱스 재설정 (깔끔하게 보이기 위함)
+    df = df.reset_index(drop=True)
+
+    # --- 메인 테이블 출력 ---
+    st.dataframe(
+        df, 
+        use_container_width=True,
+        column_config={
+            "생년월일": st.column_config.DateColumn("생년월일", format="YYYY-MM-DD"),
+            "만 나이": st.column_config.NumberColumn("만 나이", format="%d세"),
+            "세는 나이": st.column_config.NumberColumn("세는 나이", format="%d세"),
+        }
+    )
+    
+    st.write(f"총 **{len(df)}**명의 캐릭터가 등록되었습니다.")
+    
+    st.divider()
+    
+    # --- 기능: 마크다운 내보내기 ---
+    st.subheader("📤 내보내기")
+    
+    # 마크다운 텍스트 생성
+    md_text = generate_markdown(df)
+    
+    col_exp1, col_exp2 = st.columns(2)
+    
+    with col_exp1:
+        st.text_area("마크다운 미리보기 (복사해서 사용 가능)", value=md_text, height=150)
+        
+    with col_exp2:
+        st.info("아래 버튼을 누르면 .md 파일로 다운로드됩니다.")
+        st.download_button(
+            label="마크다운 파일 다운로드 (.md)",
+            data=md_text,
+            file_name="character_list.md",
+            mime="text/markdown"
+        )
+
+else:
+    st.info("👈 왼쪽 사이드바에서 캐릭터를 추가하거나 파일을 업로드해주세요.")
