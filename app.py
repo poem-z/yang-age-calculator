@@ -12,11 +12,36 @@ if 'char_list' not in st.session_state:
     st.session_state.char_list = []
 
 # ==========================================
-# [데이터 로드] CSV 파일 읽기 (절대 경로 적용)
+# [유틸] 배경색에 따른 글자색(흰/검) 결정 함수
+# ==========================================
+def get_contrast_text_color(hex_color):
+    """
+    배경색(#RRGGBB)이 주어졌을 때, 
+    밝기(Luminance)를 계산하여 검은색 또는 흰색 글자색을 반환합니다.
+    """
+    if not isinstance(hex_color, str) or not hex_color.startswith('#'):
+        return '#000000'
+    
+    # HEX -> RGB 변환
+    hex_color = hex_color.lstrip('#')
+    try:
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        
+        # 밝기 공식 (YIQ equation)
+        yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000
+        
+        # 밝기가 128 이상이면 밝은 배경이므로 검은 글자, 아니면 흰 글자
+        return '#000000' if yiq >= 128 else '#FFFFFF'
+    except:
+        return '#000000'
+
+# ==========================================
+# [데이터 로드] CSV 파일 읽기
 # ==========================================
 @st.cache_data
 def load_birth_data():
-    # 1. 현재 파일(app.py)의 절대 경로를 찾음
     current_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(current_dir, 'birth_data.csv')
     
@@ -24,34 +49,28 @@ def load_birth_data():
         return None
     
     try:
-        # 인코딩 자동 감지 시도
         try:
             df = pd.read_csv(file_path, encoding='utf-8')
         except UnicodeDecodeError:
             df = pd.read_csv(file_path, encoding='cp949')
             
-        # 컬럼명 앞뒤 공백 제거 (안전장치)
         df.columns = [c.strip() for c in df.columns]
-            
-        # 날짜 매칭 키 생성
         df['key_date'] = df['월일'].astype(str).str.replace(" ", "")
         return df
     except Exception as e:
         st.error(f"CSV 로드 실패: {e}")
         return None
 
-# 데이터 로드
 birth_df = load_birth_data()
 
 # ==========================================
-# [로직] 데이터 조회 및 병합 함수
+# [로직] 데이터 조회 함수
 # ==========================================
 def get_detailed_info(month, day):
-    # 기본값 설정
     default_info = {
-        "탄생화 (月)": "", "탄생화(日)": "정보 없음", "꽃말": "",
-        "탄생석 (月)": "", "의미 (月)": "", "탄생석(日)": "정보 없음", "의미 (日)": "",
-        "탄생목": "정보 없음", "의미": "",
+        "탄생화 (月)": "", "탄생화(日)": "", "탄생화 (영문)": "", "꽃말": "",
+        "탄생석 (月)": "", "의미 (月)": "", "탄생석(日)": "", "의미 (日)": "",
+        "탄생목": "", "의미": "",
         "별자리 (탄생좌)": "", "수호신": "",
         "색상 코드": "#FFFFFF", "색 이름": "정보 없음", "색 단어": "", "퍼스널리티": ""
     }
@@ -64,7 +83,6 @@ def get_detailed_info(month, day):
     
     if not row.empty:
         data = row.iloc[0].to_dict()
-        # 빈 값(NaN)은 빈 문자열로 처리
         for k, v in data.items():
             if pd.isna(v):
                 data[k] = ""
@@ -81,33 +99,36 @@ def add_character(name, group, b_date, b_time=None):
     man_age = today.year - b_date.year - ((today.month, today.day) < (b_date.month, b_date.day))
     korean_age = today.year - b_date.year + 1
     
-    # 상세 정보 가져오기
     d = get_detailed_info(b_date.month, b_date.day)
     
     # -------------------------------------------------------
-    # [수정됨] 월(Month)과 일(Day) 정보 합치기 포맷팅
+    # [요청 반영] 포맷팅 변경
     # -------------------------------------------------------
     
-    # 1. 탄생화: [월] 꽃 / [일] 꽃 (꽃말)
+    # 1. 탄생화: [月] ... [日] ... 영문 (의미)
     flower_str = ""
     if d.get('탄생화 (月)'):
-        flower_str += f"[월] {d['탄생화 (月)']} "
-    flower_str += f"/ [일] {d.get('탄생화(日)', '')}"
+        flower_str += f"[月] {d['탄생화 (月)']} "
+    
+    flower_str += f"[日] {d.get('탄생화(日)', '')}"
+    
+    if d.get('탄생화 (영문)'):
+        flower_str += f" {d['탄생화 (영문)']}"
+        
     if d.get('꽃말'):
         flower_str += f" ({d['꽃말']})"
         
-    # 2. 탄생석: [월] 보석(의미) / [일] 보석(의미)
+    # 2. 탄생석: [月] ... [日] ... (의미)
     stone_str = ""
-    # 월 탄생석
     if d.get('탄생석 (月)'):
-        stone_str += f"[월] {d['탄생석 (月)']}"
-        if d.get('의미 (月)'):
-            stone_str += f"({d['의미 (月)']})"
-        stone_str += " / "
-    # 일 탄생석
-    stone_str += f"[일] {d.get('탄생석(日)', '')}"
-    if d.get('의미 (日)'):
-        stone_str += f"({d['의미 (日)']})"
+        stone_str += f"[月] {d['탄생석 (月)']} "
+    
+    stone_str += f"[日] {d.get('탄생석(日)', '')}"
+    
+    # 의미는 일별 의미를 우선적으로 표기
+    stone_mean = d.get('의미 (日)') if d.get('의미 (日)') else d.get('의미 (月)')
+    if stone_mean:
+        stone_str += f" ({stone_mean})"
 
     # 3. 탄생목
     tree_str = f"{d.get('탄생목', '')}"
@@ -137,14 +158,16 @@ def add_character(name, group, b_date, b_time=None):
         "태어난 시간": time_str,
         "만 나이": man_age,
         "세는 나이": korean_age,
-        # 병합된 문자열 저장
+        
         "탄생화": flower_str,
         "탄생석": stone_str,
         "탄생목": tree_str,
         "별자리": d.get('별자리 (탄생좌)', ''),
         "수호신": d.get('수호신', ''),
+        
+        # 컬러 관련 원본 데이터 저장
         "탄생색_코드": d.get('색상 코드', '#FFFFFF'),
-        "탄생색_이름": d.get('색 이름', ''),
+        "탄생색_이름": d.get('색 이름', ''), # 예: 커피 브라운 / 아이언 스톤
         "성격": d.get('퍼스널리티', '')
     }
     st.session_state.char_list.append(new_data)
@@ -154,9 +177,8 @@ def add_character(name, group, b_date, b_time=None):
 # ==========================================
 with st.sidebar:
     st.header("📝 캐릭터 등록")
-    
     if birth_df is None:
-        st.warning("⚠️ 'birth_data.csv' 파일을 찾지 못했습니다. (파일 위치 확인 필요)")
+        st.warning("⚠️ 'birth_data.csv' 파일이 없습니다.")
 
     with st.expander("1. 개별 추가", expanded=True):
         with st.form("add_one_form", clear_on_submit=True):
@@ -168,7 +190,7 @@ with st.sidebar:
             if st.form_submit_button("등록"):
                 if input_name:
                     add_character(input_name, input_group, input_date, input_time)
-                    st.success(f"등록 완료!")
+                    st.success("등록 완료!")
                 else:
                     st.error("이름을 입력하세요.")
 
@@ -203,7 +225,7 @@ with st.sidebar:
                     st.error("필수 컬럼(이름, 생년월일) 미발견")
             except Exception as e:
                 st.error(f"오류: {e}")
-            
+    
     st.divider()
     if st.button("🗑️ 리스트 초기화"):
         st.session_state.char_list = []
@@ -224,7 +246,7 @@ if len(st.session_state.char_list) > 0:
     
     tab1, tab2, tab3, tab4 = st.tabs(["📋 리스트", "🆔 상세 카드", "📊 타임라인", "📤 내보내기"])
     
-    # 탭 1: 리스트 (텍스트 줄바꿈 허용을 위해 컬럼 설정)
+    # --- 탭 1: 리스트 ---
     with tab1:
         st.dataframe(
             view_df,
@@ -232,43 +254,82 @@ if len(st.session_state.char_list) > 0:
                 "탄생색_코드": "색상",
                 "탄생색_이름": "색 이름",
                 "생년월일": st.column_config.DateColumn("생년월일", format="YYYY-MM-DD"),
-                # 내용이 길어질 수 있으므로 너비 조정
-                "탄생화": st.column_config.TextColumn("탄생화", width="medium"),
-                "탄생석": st.column_config.TextColumn("탄생석", width="medium"),
             },
             hide_index=True,
             use_container_width=True
         )
 
-    # 탭 2: 상세 카드
+    # --- 탭 2: 상세 카드 (디자인 수정됨) ---
     with tab2:
         char_names = view_df['이름'].tolist()
         if char_names:
             selected = st.selectbox("캐릭터 선택", char_names)
             data = view_df[view_df['이름'] == selected].iloc[0]
             
+            # 레이아웃: 왼쪽(색상/성격) - 오른쪽(정보)
             c1, c2 = st.columns([1, 2])
+            
             with c1:
-                code = data['탄생색_코드']
+                # 색상 코드 및 텍스트 색상 계산
+                bg_color = data['탄생색_코드']
+                text_color = get_contrast_text_color(bg_color) # 유동적 글자색
+                
+                # HTML 스타일링 (중앙정렬, 박스 디자인)
                 st.markdown(f"""
-                <div style="background-color:{code}; width:100%; height:150px; border-radius:10px; 
-                display:flex; align-items:center; justify-content:center; color:#555; border:1px solid #ccc;">
-                    <b>{data['탄생색_이름']}</b><br>({code})
+                <div style="
+                    background-color: {bg_color};
+                    width: 100%;
+                    height: 160px;
+                    border-radius: 12px;
+                    border: 1px solid #ccc;
+                    display: flex;
+                    flex-direction: column;
+                    align_items: center;
+                    justify_content: center;
+                    color: {text_color};
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                    margin-bottom: 15px;
+                ">
+                    <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 5px; text-align: center;">
+                        {data['탄생색_이름']}
+                    </div>
+                    <div style="font-size: 1.0em; opacity: 0.9;">
+                        {bg_color}
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
-                st.caption(f"성격: {data['성격']}")
+                
+                # 성격 텍스트 (박스 아래 강조)
+                if data['성격']:
+                    st.markdown(f"""
+                    <div style="
+                        text-align: center;
+                        font-weight: 600;
+                        font-size: 1.1em;
+                        color: #333;
+                        padding: 10px;
+                        background-color: #f9f9f9;
+                        border-radius: 8px;
+                        border-left: 5px solid {bg_color};
+                    ">
+                        "{data['성격']}"
+                    </div>
+                    """, unsafe_allow_html=True)
                 
             with c2:
-                st.markdown(f"### {data['이름']} ({data['소속']})")
-                st.info(f"🎂 {data['생년월일']} (만 {data['만 나이']}세) | ⏰ {data['태어난 시간']}")
+                st.markdown(f"### {data['이름']} <span style='font-size:0.7em; color:gray'>| {data['소속']}</span>", unsafe_allow_html=True)
+                st.markdown(f"**🎂 생년월일:** {data['생년월일']} (만 {data['만 나이']}세)")
+                st.markdown(f"**⏰ 태어난 시간:** {data['태어난 시간']}")
                 
-                # 병합된 데이터 출력
-                st.write(f"**🌸 탄생화:** {data['탄생화']}")
-                st.write(f"**💎 탄생석:** {data['탄생석']}")
-                st.write(f"**🌳 탄생목:** {data['탄생목']}")
-                st.write(f"**✨ 별자리:** {data['별자리']} (수호신: {data['수호신']})")
+                st.divider()
+                
+                # 요청하신 포맷대로 출력
+                st.markdown(f"**✨ 별자리:** {data['별자리']} (수호신: {data['수호신']})")
+                st.markdown(f"**🌸 탄생화:** {data['탄생화']}")
+                st.markdown(f"**💎 탄생석:** {data['탄생석']}")
+                st.markdown(f"**🌳 탄생목:** {data['탄생목']}")
 
-    # 탭 3: 타임라인
+    # --- 탭 3: 타임라인 ---
     with tab3:
         if not view_df.empty:
             fig = px.scatter(
@@ -279,18 +340,18 @@ if len(st.session_state.char_list) > 0:
             fig.update_traces(textposition='top center')
             st.plotly_chart(fig, use_container_width=True)
 
-    # 탭 4: 내보내기
+    # --- 탭 4: 내보내기 ---
     with tab4:
         md = f"| 이름 | 생일 | 탄생화 | 탄생석 | 탄생색 |\n| :--- | :--- | :--- | :--- | :--- |\n"
         for _, row in view_df.iterrows():
-            color = f"<span style='color:{row['탄생색_코드']}'>■</span> {row['탄생색_이름']}"
-            md += f"| {row['이름']} | {row['생년월일']} | {row['탄생화']} | {row['탄생석']} | {color} |\n"
+            color_span = f"<span style='color:{row['탄생색_코드']}'>■</span> {row['탄생색_이름']}"
+            md += f"| {row['이름']} | {row['생년월일']} | {row['탄생화']} | {row['탄생석']} | {color_span} |\n"
         
         st.code(md, language='markdown')
         st.download_button("Markdown 다운로드", data=md, file_name="char_info.md")
 
 else:
     st.info("👈 캐릭터를 추가해주세요.")
-    if st.button("예시 데이터 추가"):
-        add_character("루피", "해적단", date(1999, 5, 5), "12:00")
+    if st.button("예시 데이터 추가 (루피: 5월 5일)"):
+        add_character("루피", "밀짚모자 일당", date(1999, 5, 5), "12:00")
         st.rerun()
