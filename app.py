@@ -15,30 +15,22 @@ if 'char_list' not in st.session_state:
 # [유틸] 배경색에 따른 글자색(흰/검) 결정 함수
 # ==========================================
 def get_contrast_text_color(hex_color):
-    """
-    배경색(#RRGGBB)이 주어졌을 때, 
-    밝기(Luminance)를 계산하여 검은색 또는 흰색 글자색을 반환합니다.
-    """
+    """배경색에 따라 글자색(검정/흰색) 자동 결정"""
     if not isinstance(hex_color, str) or not hex_color.startswith('#'):
         return '#000000'
     
-    # HEX -> RGB 변환
     hex_color = hex_color.lstrip('#')
     try:
         r = int(hex_color[0:2], 16)
         g = int(hex_color[2:4], 16)
         b = int(hex_color[4:6], 16)
-        
-        # 밝기 공식 (YIQ equation)
         yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000
-        
-        # 밝기가 128 이상이면 밝은 배경이므로 검은 글자, 아니면 흰 글자
         return '#000000' if yiq >= 128 else '#FFFFFF'
     except:
         return '#000000'
 
 # ==========================================
-# [데이터 로드] CSV 파일 읽기
+# [데이터 로드] CSV 파일 읽기 (컬럼명 정규화 포함)
 # ==========================================
 @st.cache_data
 def load_birth_data():
@@ -53,8 +45,12 @@ def load_birth_data():
             df = pd.read_csv(file_path, encoding='utf-8')
         except UnicodeDecodeError:
             df = pd.read_csv(file_path, encoding='cp949')
-            
-        df.columns = [c.strip() for c in df.columns]
+        
+        # [중요] 컬럼명에서 모든 공백 제거 (매칭 오류 방지)
+        # 예: "탄생화 (月)" -> "탄생화(月)", "탄생석(日)" -> "탄생석(日)"
+        df.columns = [c.replace(" ", "") for c in df.columns]
+        
+        # 날짜 매칭 키 생성
         df['key_date'] = df['월일'].astype(str).str.replace(" ", "")
         return df
     except Exception as e:
@@ -64,15 +60,16 @@ def load_birth_data():
 birth_df = load_birth_data()
 
 # ==========================================
-# [로직] 데이터 조회 함수
+# [로직] 데이터 조회 함수 (개선됨)
 # ==========================================
 def get_detailed_info(month, day):
+    # 공백이 제거된 컬럼명 기준으로 기본값 설정
     default_info = {
-        "탄생화 (月)": "", "탄생화(日)": "", "탄생화 (영문)": "", "꽃말": "",
-        "탄생석 (月)": "", "의미 (月)": "", "탄생석(日)": "", "의미 (日)": "",
+        "탄생화(月)": "", "탄생화(日)": "", "탄생화(영문)": "", "꽃말": "",
+        "탄생석(月)": "", "의미(月)": "", "탄생석(日)": "", "의미(日)": "",
         "탄생목": "", "의미": "",
-        "별자리 (탄생좌)": "", "수호신": "",
-        "색상 코드": "#FFFFFF", "색 이름": "정보 없음", "색 단어": "", "퍼스널리티": ""
+        "별자리(탄생좌)": "", "수호신": "",
+        "색상코드": "#FFFFFF", "색이름": "정보 없음", "색단어": "", "퍼스널리티": ""
     }
     
     if birth_df is None:
@@ -82,11 +79,15 @@ def get_detailed_info(month, day):
     row = birth_df[birth_df['key_date'] == key]
     
     if not row.empty:
+        # 시리즈를 딕셔너리로 변환
         data = row.iloc[0].to_dict()
+        
+        # 빈 값(NaN) 처리
+        final_data = default_info.copy()
         for k, v in data.items():
-            if pd.isna(v):
-                data[k] = ""
-        return data
+            if not pd.isna(v):
+                final_data[k] = v
+        return final_data
     else:
         return default_info
 
@@ -102,31 +103,47 @@ def add_character(name, group, b_date, b_time=None):
     d = get_detailed_info(b_date.month, b_date.day)
     
     # -------------------------------------------------------
-    # [요청 반영] 포맷팅 변경
+    # [데이터 포맷팅 수정] 공백 제거된 키 사용
     # -------------------------------------------------------
     
-    # 1. 탄생화: [月] ... [日] ... 영문 (의미)
-    flower_str = ""
-    if d.get('탄생화 (月)'):
-        flower_str += f"[月] {d['탄생화 (月)']} "
+    # 1. 탄생화
+    # 형식: [月] 월꽃 [日] 일꽃 영문 (꽃말)
+    flower_parts = []
+    if d.get('탄생화(月)'):
+        flower_parts.append(f"[月] {d['탄생화(月)']}")
     
-    flower_str += f"[日] {d.get('탄생화(日)', '')}"
+    # 일 탄생화 + 영문
+    day_flower = str(d.get('탄생화(日)', '')).strip()
+    day_flower_en = str(d.get('탄생화(영문)', '')).strip()
     
-    if d.get('탄생화 (영문)'):
-        flower_str += f" {d['탄생화 (영문)']}"
+    day_part = ""
+    if day_flower:
+        day_part = f"[日] {day_flower}"
+    
+    if day_flower_en and day_flower_en != 'nan':
+        day_part += f" {day_flower_en}"
         
+    if day_part:
+        flower_parts.append(day_part)
+        
+    flower_str = " ".join(flower_parts)
     if d.get('꽃말'):
         flower_str += f" ({d['꽃말']})"
         
-    # 2. 탄생석: [月] ... [日] ... (의미)
-    stone_str = ""
-    if d.get('탄생석 (月)'):
-        stone_str += f"[月] {d['탄생석 (月)']} "
+    # 2. 탄생석
+    # 형식: [月] 월보석 [日] 일보석 (의미)
+    stone_parts = []
+    if d.get('탄생석(月)'):
+        stone_parts.append(f"[月] {d['탄생석(月)']}")
+        
+    day_stone = str(d.get('탄생석(日)', '')).strip()
+    if day_stone:
+        stone_parts.append(f"[日] {day_stone}")
+        
+    stone_str = " ".join(stone_parts)
     
-    stone_str += f"[日] {d.get('탄생석(日)', '')}"
-    
-    # 의미는 일별 의미를 우선적으로 표기
-    stone_mean = d.get('의미 (日)') if d.get('의미 (日)') else d.get('의미 (月)')
+    # 의미 (일별 의미 우선, 없으면 월별 의미)
+    stone_mean = d.get('의미(日)') if d.get('의미(日)') else d.get('의미(月)')
     if stone_mean:
         stone_str += f" ({stone_mean})"
 
@@ -135,7 +152,7 @@ def add_character(name, group, b_date, b_time=None):
     if d.get('의미'):
         tree_str += f" ({d['의미']})"
 
-    # 시간 처리
+    # 시간
     time_str = "미입력"
     if b_time:
         if isinstance(b_time, str):
@@ -162,12 +179,12 @@ def add_character(name, group, b_date, b_time=None):
         "탄생화": flower_str,
         "탄생석": stone_str,
         "탄생목": tree_str,
-        "별자리": d.get('별자리 (탄생좌)', ''),
+        "별자리": d.get('별자리(탄생좌)', ''),
         "수호신": d.get('수호신', ''),
         
-        # 컬러 관련 원본 데이터 저장
-        "탄생색_코드": d.get('색상 코드', '#FFFFFF'),
-        "탄생색_이름": d.get('색 이름', ''), # 예: 커피 브라운 / 아이언 스톤
+        # 컬러 정보 (공백 제거된 키)
+        "탄생색_코드": d.get('색상코드', '#FFFFFF'),
+        "탄생색_이름": d.get('색이름', '정보 없음'),
         "성격": d.get('퍼스널리티', '')
     }
     st.session_state.char_list.append(new_data)
@@ -203,6 +220,7 @@ with st.sidebar:
                 else:
                     temp_df = pd.read_excel(uploaded_file)
                 
+                # 입력 파일 컬럼 처리
                 temp_df.columns = [c.strip() for c in temp_df.columns]
                 cols = temp_df.columns
                 
@@ -259,22 +277,20 @@ if len(st.session_state.char_list) > 0:
             use_container_width=True
         )
 
-    # --- 탭 2: 상세 카드 (디자인 수정됨) ---
+    # --- 탭 2: 상세 카드 (CSS 강화됨) ---
     with tab2:
         char_names = view_df['이름'].tolist()
         if char_names:
             selected = st.selectbox("캐릭터 선택", char_names)
             data = view_df[view_df['이름'] == selected].iloc[0]
             
-            # 레이아웃: 왼쪽(색상/성격) - 오른쪽(정보)
             c1, c2 = st.columns([1, 2])
             
             with c1:
-                # 색상 코드 및 텍스트 색상 계산
                 bg_color = data['탄생색_코드']
-                text_color = get_contrast_text_color(bg_color) # 유동적 글자색
+                text_color = get_contrast_text_color(bg_color)
                 
-                # HTML 스타일링 (중앙정렬, 박스 디자인)
+                # HTML: flexbox를 이용한 완벽한 중앙 정렬
                 st.markdown(f"""
                 <div style="
                     background-color: {bg_color};
@@ -286,33 +302,36 @@ if len(st.session_state.char_list) > 0:
                     flex-direction: column;
                     align_items: center;
                     justify_content: center;
+                    text-align: center;
                     color: {text_color};
                     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
                     margin-bottom: 15px;
                 ">
-                    <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 5px; text-align: center;">
+                    <div style="font-size: 1.3em; font-weight: bold; margin-bottom: 8px; width: 100%;">
                         {data['탄생색_이름']}
                     </div>
-                    <div style="font-size: 1.0em; opacity: 0.9;">
+                    <div style="font-size: 1.0em; opacity: 0.85; font-family: monospace; width: 100%;">
                         {bg_color}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 성격 텍스트 (박스 아래 강조)
+                # 성격 텍스트 (박스 밖)
                 if data['성격']:
                     st.markdown(f"""
                     <div style="
                         text-align: center;
                         font-weight: 600;
                         font-size: 1.1em;
-                        color: #333;
-                        padding: 10px;
-                        background-color: #f9f9f9;
+                        color: #444;
+                        padding: 12px;
+                        background-color: #f8f9fa;
                         border-radius: 8px;
                         border-left: 5px solid {bg_color};
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                        line-height: 1.5;
                     ">
-                        "{data['성격']}"
+                        {data['성격']}
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -323,7 +342,6 @@ if len(st.session_state.char_list) > 0:
                 
                 st.divider()
                 
-                # 요청하신 포맷대로 출력
                 st.markdown(f"**✨ 별자리:** {data['별자리']} (수호신: {data['수호신']})")
                 st.markdown(f"**🌸 탄생화:** {data['탄생화']}")
                 st.markdown(f"**💎 탄생석:** {data['탄생석']}")
