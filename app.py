@@ -16,18 +16,24 @@ if 'char_list' not in st.session_state:
 # ==========================================
 @st.cache_data # 데이터 캐싱 (속도 향상)
 def load_birth_data():
-    file_path = 'birth_data.csv'
+    # 1. 현재 이 파이썬 파일(app.py)이 있는 폴더의 위치를 알아냅니다.
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 2. 그 폴더 경로와 파일명을 합쳐서 정확한 주소를 만듭니다.
+    file_path = os.path.join(current_dir, 'birth_data.csv')
+    
     if not os.path.exists(file_path):
+        # 디버깅을 위해 어디서 찾았는지 에러 메시지로 보여줍니다.
+        st.error(f"파일을 찾을 수 없습니다. 탐색 경로: {file_path}") 
         return None
     
     try:
-        # CSV 읽기 (인코딩은 utf-8 또는 cp949 시도)
+        # CSV 읽기
         try:
             df = pd.read_csv(file_path, encoding='utf-8')
         except UnicodeDecodeError:
             df = pd.read_csv(file_path, encoding='cp949')
             
-        # 날짜 매칭을 위해 '월일' 컬럼의 공백 제거 (예: "1월 1일" -> "1월1일")
         df['key_date'] = df['월일'].astype(str).str.replace(" ", "")
         return df
     except Exception as e:
